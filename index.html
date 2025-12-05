@@ -106,11 +106,10 @@
 </head>
 <body>
 <main>
-    <h1>Reader – RSS direkt im Browser</h1>
-    <p>Die folgende Oberfläche lädt wesentliche Teile des Python-Skripts <code>Main.py</code> via WebAssembly (Pyodide).
-        Die eigentlichen Feed-Dateien liegen lokal im Repository (z.&nbsp;B. via <code>git pull</code> aktualisiert)
-        und werden direkt aus dem <code>feeds/</code>-Ordner gelesen. Damit entfällt das CORS-Problem, solange Sie die
-        XML-Snapshots regelmäßig per <code>cache_feeds.py</code> erneuern und ins Repository pushen.</p>
+    <h1>RSS Reader</h1>
+    <p>Dieser RSS Reader ruft verschiedene XML RSS Feeds ab, die vorher definiert worden sind. Die Feeds müssen vorher gecached werden
+damit die Feeds auch angezeigt werden können.        
+    </p>
 
     <section class="grid">
         <div class="card">
@@ -125,7 +124,7 @@
         <div class="card">
             <p>Nach dem Klick auf „Feed laden“ wird das Python-Programm gestartet und verarbeitet die lokal
                 vorhandenen XML-Dateien aus dem Cache. Aktualisieren Sie die Dateien per <code>python cache_feeds.py</code>
-                und Git.</p>
+                und Git commit.</p>
             <button id="load-btn" disabled>Python &amp; lokal gespeicherten Feed laden …</button>
         </div>
     </section>
