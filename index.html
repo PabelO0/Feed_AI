@@ -122,8 +122,13 @@ damit die Feeds auch angezeigt werden können.
             </select>
         </div>
         <div class="card">
+            <label for="item-count">Anzahl Einträge (1–10)</label>
+            <input id="item-count" type="number" min="1" max="10" value="5">
+            <small>Maximal 10 gecachete Einträge pro Feed zur Anzeige auswählen.</small>
+        </div>
+        <div class="card">
             <p>Nach dem Klick auf „Feed laden“ wird das Python-Programm gestartet und verarbeitet die lokal
-                vorhandenen XML-Dateien aus dem Cache. Aktualisieren Sie die Dateien per <code>python cache_feeds.py</code>
+                vorhandenen XML-Dateien aus dem Cache. Aktualisieren Sie die Dateien per<code> cache_feeds.py</code>
                 und Git commit.</p>
             <button id="load-btn" disabled>Python &amp; lokal gespeicherten Feed laden …</button>
         </div>
@@ -139,6 +144,7 @@ damit die Feeds auch angezeigt werden können.
     const entriesEl = document.getElementById("entries");
     const button = document.getElementById("load-btn");
     const selectEl = document.getElementById("feed-select");
+    const itemCountEl = document.getElementById("item-count");
 
     const feedMap = {
         1: { name: "Haufe Nachrichten", path: "feeds/haufe.xml", source: "https://www.haufe.de/xml/rss_129128.xml" },
@@ -227,6 +233,8 @@ def parse_feed_xml(xml_text: str, limit: int = 5):
         try {
             const pyodide = await pyodideReady;
             const choice = parseInt(selectEl.value, 10);
+            const desiredItems = parseInt(itemCountEl.value, 10);
+            const limit = Math.min(10, Math.max(1, Number.isNaN(desiredItems) ? 5 : desiredItems));
 
             const feedConfig = feedMap[choice];
             if (!feedConfig) {
@@ -242,7 +250,7 @@ def parse_feed_xml(xml_text: str, limit: int = 5):
             const xmlText = await response.text();
 
             const parseFeed = pyodide.globals.get("parse_feed_xml");
-            const parsed = await parseFeed(xmlText, 5);
+            const parsed = await parseFeed(xmlText, limit);
             const entries = parsed.toJs({deep: true});
             parsed.destroy();
             parseFeed.destroy();

@@ -16,6 +16,8 @@ FEEDS: Dict[int, Tuple[str, str]] = {
     4: ("Springer IT", "https://www.springerprofessional.de/rss/rss-feeds/7097080")
 }
 CUSTOM_OPTION = 9
+MAX_ITEMS = 10
+DEFAULT_ITEMS = 5
 
 
 def fetch_feed(url: str) -> ET.Element:
@@ -128,6 +130,22 @@ def display_entries(entries: List[Tuple[str, str, List[str]]]) -> None:
             print(wrapped)
 
 
+def prompt_for_item_count() -> int:
+    hint = f"Wieviele Eintraege anzeigen (1-{MAX_ITEMS}, Enter fuer {DEFAULT_ITEMS}): "
+    while True:
+        try:
+            user_input = input(hint).strip()
+        except EOFError:
+            return DEFAULT_ITEMS
+        if not user_input:
+            return DEFAULT_ITEMS
+        if user_input.isdigit():
+            count = int(user_input)
+            if 1 <= count <= MAX_ITEMS:
+                return count
+        print("Bitte eine Zahl im gueltigen Bereich eingeben.")
+
+
 def main() -> None:
     print("Verfuegbare RSS-Feeds:")
     for key, (name, _) in FEEDS.items():
@@ -143,6 +161,8 @@ def main() -> None:
     else:
         name, url = FEEDS[choice]
 
+    item_limit = prompt_for_item_count()
+
     print(f"\nLade '{name}'...")
     try:
         root = fetch_feed(url)
@@ -153,7 +173,7 @@ def main() -> None:
         print(f"Feed konnte nicht verarbeitet werden: {exc}", file=sys.stderr)
         raise SystemExit(1)
 
-    entries = extract_entries(root)
+    entries = extract_entries(root, limit=item_limit)
     display_entries(entries)
 
 
