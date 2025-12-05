@@ -13,6 +13,7 @@ FEEDS: Dict[int, Tuple[str, str]] = {
     1: ("Haufe Nachrichten", "https://www.haufe.de/xml/rss_129128.xml"),
     2: ("Bundesregierung", "https://www.bundesregierung.de/service/rss/breg-de/1151244/feed.xml"),
     3: ("Handelsblatt Politik", "http://www.handelsblatt.com/contentexport/feed/politik"),
+    4: ("Springer IT", "https://www.springerprofessional.de/rss/rss-feeds/7097080")
 }
 CUSTOM_OPTION = 9
 
@@ -37,12 +38,26 @@ def fetch_feed(url: str) -> ET.Element:
     return ET.fromstring(xml_text)
 
 
-def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, str]]:
+def _collect_links(elements: List[ET.Element]) -> List[str]:
+    """Collect link URLs from a list of XML elements."""
+    links: List[str] = []
+    seen = set()
+    for elem in elements:
+        href = (elem.text or "").strip()
+        attr_href = elem.attrib.get("href", "").strip()
+        url = href or attr_href
+        if url and url not in seen:
+            links.append(url)
+            seen.add(url)
+    return links
+
+
+def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, List[str]]]:
     """
-    Extract (title, summary, link) tuples from either RSS or Atom feeds. Returns
+    Extract (title, summary, links) tuples from either RSS or Atom feeds. Returns
     up to `limit` entries, skipping empty titles.
     """
-    entries: List[Tuple[str, str, str]] = []
+    entries: List[Tuple[str, str, List[str]]] = []
 
     channel = root.find("channel")
     if channel is not None:
@@ -51,8 +66,13 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, st
             if not title:
                 continue
             summary = (item.findtext("description") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            entries.append((title, summary, link))
+            link_elements = item.findall("link")
+            links = _collect_links(link_elements)
+            if not links:
+                link_text = (item.findtext("link") or "").strip()
+                if link_text:
+                    links = [link_text]
+            entries.append((title, summary, links))
             if len(entries) >= limit:
                 return entries
         return entries
@@ -67,13 +87,9 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, st
             or entry.findtext(f"{atom_ns}content")
             or ""
         ).strip()
-        link = entry.findtext(f"{atom_ns}link") or ""
-        link = link.strip()
-        if not link:
-            link_elem = entry.find(f"{atom_ns}link")
-            if link_elem is not None:
-                link = link_elem.attrib.get("href", "").strip()
-        entries.append((title, summary, link))
+        link_elements = entry.findall(f"{atom_ns}link")
+        links = _collect_links(link_elements)
+        entries.append((title, summary, links))
         if len(entries) >= limit:
             break
     return entries
@@ -96,15 +112,17 @@ def prompt_for_choice() -> int:
         print("Ungueltige Auswahl, bitte erneut versuchen.")
 
 
-def display_entries(entries: List[Tuple[str, str, str]]) -> None:
+def display_entries(entries: List[Tuple[str, str, List[str]]]) -> None:
     if not entries:
         print("Keine Eintraege fuer diesen Feed gefunden.")
         return
 
-    for idx, (title, summary, link) in enumerate(entries, start=1):
+    for idx, (title, summary, links) in enumerate(entries, start=1):
         print(f"\n{idx}. {title}")
-        if link:
-            print(f"   Link: {link}")
+        if links:
+            print("   Links:")
+            for url in links:
+                print(f"    - {url}")
         if summary:
             wrapped = textwrap.fill(summary, width=80, initial_indent="   ", subsequent_indent="   ")
             print(wrapped)

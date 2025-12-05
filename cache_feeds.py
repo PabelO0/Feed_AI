@@ -14,6 +14,7 @@ OUTPUT_FILES: Dict[int, str] = {
     1: "feeds/haufe.xml",
     2: "feeds/bundesregierung.xml",
     3: "feeds/handelsblatt.xml",
+    4: "feeds/springer_it.xml",
 }
 
 

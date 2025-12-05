@@ -90,6 +90,18 @@
             color: #cc3a00;
             font-weight: 600;
         }
+        .entry-links {
+            margin: 0.4rem 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .entry-links a {
+            color: #0052a0;
+            text-decoration: underline;
+            font-size: 0.9rem;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -107,16 +119,12 @@
                 <option value="1">1 · Haufe Nachrichten</option>
                 <option value="2">2 · Bundesregierung</option>
                 <option value="3">3 · Handelsblatt Politik</option>
-                <option value="9">9 · Eigene Feed-URL</option>
             </select>
         </div>
         <div class="card">
-            <label for="custom-url">Eigener Feed (Pfad im Repository)</label>
-            <input id="custom-url" type="text" placeholder="z.B. feeds/custom.xml">
-        </div>
-        <div class="card">
             <p>Nach dem Klick auf „Feed laden“ wird das Python-Programm gestartet und verarbeitet die lokal
-                vorhandene XML-Datei. Aktualisieren Sie die Dateien per <code>python cache_feeds.py</code> und Git.</p>
+                vorhandenen XML-Dateien aus dem Cache. Aktualisieren Sie die Dateien per <code>python cache_feeds.py</code>
+                und Git.</p>
             <button id="load-btn" disabled>Python &amp; lokal gespeicherten Feed laden …</button>
         </div>
     </section>
@@ -131,12 +139,12 @@
     const entriesEl = document.getElementById("entries");
     const button = document.getElementById("load-btn");
     const selectEl = document.getElementById("feed-select");
-    const customUrlEl = document.getElementById("custom-url");
 
     const feedMap = {
         1: { name: "Haufe Nachrichten", path: "feeds/haufe.xml", source: "https://www.haufe.de/xml/rss_129128.xml" },
         2: { name: "Bundesregierung", path: "feeds/bundesregierung.xml", source: "https://www.bundesregierung.de/service/rss/breg-de/1151244/feed.xml" },
         3: { name: "Handelsblatt Politik", path: "feeds/handelsblatt.xml", source: "http://www.handelsblatt.com/contentexport/feed/politik" },
+        4: { name: "Springer IT", path: "feeds/springer_it.xml", source: "https://www.springerprofessional.de/rss/rss-feeds/7097080"},
     };
 
     const pythonSource = `
@@ -145,8 +153,20 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from typing import List, Tuple
 
-def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, str]]:
-    entries: List[Tuple[str, str, str]] = []
+def _collect_links(elements: List[ET.Element]) -> List[str]:
+    links: List[str] = []
+    seen = set()
+    for elem in elements:
+        text = (elem.text or "").strip()
+        href = elem.attrib.get("href", "").strip()
+        url = text or href
+        if url and url not in seen:
+            links.append(url)
+            seen.add(url)
+    return links
+
+def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, List[str]]]:
+    entries: List[Tuple[str, str, List[str]]] = []
 
     channel = root.find("channel")
     if channel is not None:
@@ -155,8 +175,13 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, st
             if not title:
                 continue
             summary = (item.findtext("description") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            entries.append((title, summary, link))
+            link_elements = item.findall("link")
+            links = _collect_links(link_elements)
+            if not links:
+                link_text = (item.findtext("link") or "").strip()
+                if link_text:
+                    links = [link_text]
+            entries.append((title, summary, links))
             if len(entries) >= limit:
                 return entries
         return entries
@@ -171,13 +196,9 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, st
             or entry.findtext(f"{atom_ns}content")
             or ""
         ).strip()
-        link = entry.findtext(f"{atom_ns}link") or ""
-        link = link.strip()
-        if not link:
-            link_elem = entry.find(f"{atom_ns}link")
-            if link_elem is not None:
-                link = link_elem.attrib.get("href", "").strip()
-        entries.append((title, summary, link))
+        link_elements = entry.findall(f"{atom_ns}link")
+        links = _collect_links(link_elements)
+        entries.append((title, summary, links))
         if len(entries) >= limit:
             break
     return entries
@@ -206,22 +227,12 @@ def parse_feed_xml(xml_text: str, limit: int = 5):
         try {
             const pyodide = await pyodideReady;
             const choice = parseInt(selectEl.value, 10);
-            const customUrl = customUrlEl.value.trim();
 
-            let url;
-            let feedName;
-            if (choice === 9) {
-                if (!customUrl) {
-                    throw new Error("Kein Pfad angegeben.");
-                }
-                url = customUrl;
-                feedName = "Eigener Feed";
-            } else if (feedMap[choice]) {
-                url = feedMap[choice].path;
-                feedName = feedMap[choice].name;
-            } else {
+            const feedConfig = feedMap[choice];
+            if (!feedConfig) {
                 throw new Error("Unbekannte Feed-Auswahl.");
             }
+            const { path: url, name: feedName } = feedConfig;
 
             logEl.textContent = "Lese XML-Datei …";
             const response = await fetch(url);
@@ -240,18 +251,24 @@ def parse_feed_xml(xml_text: str, limit: int = 5):
                 entriesEl.innerHTML = "<p class='warn'>Keine Einträge gefunden.</p>";
             } else {
                 const frag = document.createDocumentFragment();
-                entries.forEach(([title, summary, link], index) => {
+                entries.forEach(([title, summary, links], index) => {
                     const article = document.createElement("article");
                     const heading = document.createElement("h3");
                     heading.textContent = `${index + 1}. ${title}`;
                     article.appendChild(heading);
-                    if (link) {
-                        const anchor = document.createElement("a");
-                        anchor.href = link;
-                        anchor.textContent = "Zum Artikel";
-                        anchor.target = "_blank";
-                        anchor.rel = "noopener noreferrer";
-                        article.appendChild(anchor);
+                    const linkList = Array.isArray(links) ? links : (links ? [links] : []);
+                    if (linkList.length) {
+                        const linkWrapper = document.createElement("div");
+                        linkWrapper.className = "entry-links";
+                        linkList.forEach((url) => {
+                            const anchor = document.createElement("a");
+                            anchor.href = url;
+                            anchor.textContent = url;
+                            anchor.target = "_blank";
+                            anchor.rel = "noopener noreferrer";
+                            linkWrapper.appendChild(anchor);
+                        });
+                        article.appendChild(linkWrapper);
                     }
                     if (summary) {
                         const wrapper = document.createElement("div");
