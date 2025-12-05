@@ -145,8 +145,8 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from typing import List, Tuple
 
-def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
-    entries: List[Tuple[str, str]] = []
+def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, str]]:
+    entries: List[Tuple[str, str, str]] = []
 
     channel = root.find("channel")
     if channel is not None:
@@ -155,7 +155,8 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
             if not title:
                 continue
             summary = (item.findtext("description") or "").strip()
-            entries.append((title, summary))
+            link = (item.findtext("link") or "").strip()
+            entries.append((title, summary, link))
             if len(entries) >= limit:
                 return entries
         return entries
@@ -170,7 +171,13 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
             or entry.findtext(f"{atom_ns}content")
             or ""
         ).strip()
-        entries.append((title, summary))
+        link = entry.findtext(f"{atom_ns}link") or ""
+        link = link.strip()
+        if not link:
+            link_elem = entry.find(f"{atom_ns}link")
+            if link_elem is not None:
+                link = link_elem.attrib.get("href", "").strip()
+        entries.append((title, summary, link))
         if len(entries) >= limit:
             break
     return entries
@@ -233,11 +240,19 @@ def parse_feed_xml(xml_text: str, limit: int = 5):
                 entriesEl.innerHTML = "<p class='warn'>Keine Einträge gefunden.</p>";
             } else {
                 const frag = document.createDocumentFragment();
-                entries.forEach(([title, summary], index) => {
+                entries.forEach(([title, summary, link], index) => {
                     const article = document.createElement("article");
                     const heading = document.createElement("h3");
                     heading.textContent = `${index + 1}. ${title}`;
                     article.appendChild(heading);
+                    if (link) {
+                        const anchor = document.createElement("a");
+                        anchor.href = link;
+                        anchor.textContent = "Zum Artikel";
+                        anchor.target = "_blank";
+                        anchor.rel = "noopener noreferrer";
+                        article.appendChild(anchor);
+                    }
                     if (summary) {
                         const wrapper = document.createElement("div");
                         wrapper.className = "feed-body";

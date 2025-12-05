@@ -37,12 +37,12 @@ def fetch_feed(url: str) -> ET.Element:
     return ET.fromstring(xml_text)
 
 
-def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
+def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str, str]]:
     """
-    Extract (title, summary) tuples from either RSS or Atom feeds. Returns
+    Extract (title, summary, link) tuples from either RSS or Atom feeds. Returns
     up to `limit` entries, skipping empty titles.
     """
-    entries: List[Tuple[str, str]] = []
+    entries: List[Tuple[str, str, str]] = []
 
     channel = root.find("channel")
     if channel is not None:
@@ -51,7 +51,8 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
             if not title:
                 continue
             summary = (item.findtext("description") or "").strip()
-            entries.append((title, summary))
+            link = (item.findtext("link") or "").strip()
+            entries.append((title, summary, link))
             if len(entries) >= limit:
                 return entries
         return entries
@@ -66,7 +67,13 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
             or entry.findtext(f"{atom_ns}content")
             or ""
         ).strip()
-        entries.append((title, summary))
+        link = entry.findtext(f"{atom_ns}link") or ""
+        link = link.strip()
+        if not link:
+            link_elem = entry.find(f"{atom_ns}link")
+            if link_elem is not None:
+                link = link_elem.attrib.get("href", "").strip()
+        entries.append((title, summary, link))
         if len(entries) >= limit:
             break
     return entries
@@ -89,13 +96,15 @@ def prompt_for_choice() -> int:
         print("Ungueltige Auswahl, bitte erneut versuchen.")
 
 
-def display_entries(entries: List[Tuple[str, str]]) -> None:
+def display_entries(entries: List[Tuple[str, str, str]]) -> None:
     if not entries:
         print("Keine Eintraege fuer diesen Feed gefunden.")
         return
 
-    for idx, (title, summary) in enumerate(entries, start=1):
+    for idx, (title, summary, link) in enumerate(entries, start=1):
         print(f"\n{idx}. {title}")
+        if link:
+            print(f"   Link: {link}")
         if summary:
             wrapped = textwrap.fill(summary, width=80, initial_indent="   ", subsequent_indent="   ")
             print(wrapped)
