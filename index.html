@@ -14,6 +14,7 @@
             padding: clamp(1.5rem, 4vw, 3rem);
             background: radial-gradient(circle at top, #f5f6ff, #eef1f9 35%, #e3e7f5);
             min-height: 100vh;
+            color: #000000;
         }
         main {
             max-width: 960px;
@@ -94,9 +95,10 @@
 <body>
 <main>
     <h1>Reader – RSS direkt im Browser</h1>
-    <p>Die folgende Oberfläche lädt das Python-Skript <code>Main.py</code> vollständig in WebAssembly (Pyodide) und
-        führt es direkt im Browser aus. Die Feed-Abfragen unterliegen den CORS-Regeln der jeweiligen Anbieter und
-        funktionieren daher nur, wenn der Feed das Abrufen aus dem Browser erlaubt.</p>
+    <p>Die folgende Oberfläche lädt wesentliche Teile des Python-Skripts <code>Main.py</code> via WebAssembly (Pyodide).
+        Die eigentlichen Feed-Dateien liegen lokal im Repository (z.&nbsp;B. via <code>git pull</code> aktualisiert)
+        und werden direkt aus dem <code>feeds/</code>-Ordner gelesen. Damit entfällt das CORS-Problem, solange Sie die
+        XML-Snapshots regelmäßig per <code>cache_feeds.py</code> erneuern und ins Repository pushen.</p>
 
     <section class="grid">
         <div class="card">
@@ -109,13 +111,13 @@
             </select>
         </div>
         <div class="card">
-            <label for="custom-url">Eigene Feed-URL (für Option 9)</label>
-            <input id="custom-url" type="url" placeholder="https://example.org/feed.xml">
+            <label for="custom-url">Eigener Feed (Pfad im Repository)</label>
+            <input id="custom-url" type="text" placeholder="z.B. feeds/custom.xml">
         </div>
         <div class="card">
-            <p>Nach dem Klick auf „Feed laden“ wird das Python-Programm gestartet, Zertifikatsfehler werden
-                – genau wie in der CLI-Version – mit einem Warnhinweis behandelt.</p>
-            <button id="load-btn" disabled>Python &amp; Feed laden …</button>
+            <p>Nach dem Klick auf „Feed laden“ wird das Python-Programm gestartet und verarbeitet die lokal
+                vorhandene XML-Datei. Aktualisieren Sie die Dateien per <code>python cache_feeds.py</code> und Git.</p>
+            <button id="load-btn" disabled>Python &amp; lokal gespeicherten Feed laden …</button>
         </div>
     </section>
 
@@ -131,41 +133,17 @@
     const selectEl = document.getElementById("feed-select");
     const customUrlEl = document.getElementById("custom-url");
 
+    const feedMap = {
+        1: { name: "Haufe Nachrichten", path: "feeds/haufe.xml", source: "https://www.haufe.de/xml/rss_129128.xml" },
+        2: { name: "Bundesregierung", path: "feeds/bundesregierung.xml", source: "https://www.bundesregierung.de/service/rss/breg-de/1151244/feed.xml" },
+        3: { name: "Handelsblatt Politik", path: "feeds/handelsblatt.xml", source: "http://www.handelsblatt.com/contentexport/feed/politik" },
+    };
+
     const pythonSource = `
 from __future__ import annotations
 
-import ssl
-import sys
-import textwrap
-import urllib.error
-import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Tuple
-
-FEEDS: Dict[int, Tuple[str, str]] = {
-    1: ("Haufe Nachrichten", "https://www.haufe.de/xml/rss_129128.xml"),
-    2: ("Bundesregierung", "https://www.bundesregierung.de/service/rss/breg-de/1151244/feed.xml"),
-    3: ("Handelsblatt Politik", "http://www.handelsblatt.com/contentexport/feed/politik"),
-}
-CUSTOM_OPTION = 9
-
-def fetch_feed(url: str) -> ET.Element:
-    default_ctx = ssl.create_default_context()
-    try:
-        with urllib.request.urlopen(url, timeout=15, context=default_ctx) as response:
-            xml_text = response.read()
-    except urllib.error.URLError as exc:
-        if isinstance(exc.reason, ssl.SSLCertVerificationError):
-            print(
-                "Zertifikatspruefung fehlgeschlagen, versuche es ohne Pruefung erneut...",
-                file=sys.stderr,
-            )
-            insecure_ctx = ssl._create_unverified_context()
-            with urllib.request.urlopen(url, timeout=15, context=insecure_ctx) as response:
-                xml_text = response.read()
-        else:
-            raise
-    return ET.fromstring(xml_text)
+from typing import List, Tuple
 
 def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
     entries: List[Tuple[str, str]] = []
@@ -197,18 +175,9 @@ def extract_entries(root: ET.Element, limit: int = 5) -> List[Tuple[str, str]]:
             break
     return entries
 
-def get_feed_payload(choice: int, custom_url: str | None = None):
-    if choice == CUSTOM_OPTION:
-        if not custom_url:
-            raise ValueError("Keine URL angegeben.")
-        name = "Eigener Feed"
-        url = custom_url
-    else:
-        name, url = FEEDS[choice]
-
-    root = fetch_feed(url)
-    entries = extract_entries(root)
-    return {"name": name, "entries": entries}
+def parse_feed_xml(xml_text: str, limit: int = 5):
+    root = ET.fromstring(xml_text)
+    return extract_entries(root, limit=limit)
 `;
 
     async function initPyodide() {
@@ -226,17 +195,40 @@ def get_feed_payload(choice: int, custom_url: str | None = None):
     button.addEventListener("click", async () => {
         button.disabled = true;
         entriesEl.innerHTML = "";
-        logEl.textContent = "Lade Feed über Python …";
+        logEl.textContent = "Lade lokale Feed-Datei und reiche XML an Python weiter …";
         try {
             const pyodide = await pyodideReady;
             const choice = parseInt(selectEl.value, 10);
             const customUrl = customUrlEl.value.trim();
-            const getPayload = pyodide.globals.get("get_feed_payload");
-            const result = await getPayload(choice, customUrl || null);
-            const data = result.toJs({deep: true});
-            result.destroy();
-            getPayload.destroy();
-            const entries = data.entries || [];
+
+            let url;
+            let feedName;
+            if (choice === 9) {
+                if (!customUrl) {
+                    throw new Error("Kein Pfad angegeben.");
+                }
+                url = customUrl;
+                feedName = "Eigener Feed";
+            } else if (feedMap[choice]) {
+                url = feedMap[choice].path;
+                feedName = feedMap[choice].name;
+            } else {
+                throw new Error("Unbekannte Feed-Auswahl.");
+            }
+
+            logEl.textContent = "Lese XML-Datei …";
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP-Fehler ${response.status}`);
+            }
+            const xmlText = await response.text();
+
+            const parseFeed = pyodide.globals.get("parse_feed_xml");
+            const parsed = await parseFeed(xmlText, 5);
+            const entries = parsed.toJs({deep: true});
+            parsed.destroy();
+            parseFeed.destroy();
+
             if (!entries.length) {
                 entriesEl.innerHTML = "<p class='warn'>Keine Einträge gefunden.</p>";
             } else {
@@ -247,19 +239,20 @@ def get_feed_payload(choice: int, custom_url: str | None = None):
                     heading.textContent = `${index + 1}. ${title}`;
                     article.appendChild(heading);
                     if (summary) {
-                        const p = document.createElement("p");
-                        p.textContent = summary.replace(/\\s+/g, " ").trim();
-                        article.appendChild(p);
+                        const wrapper = document.createElement("div");
+                        wrapper.className = "feed-body";
+                        wrapper.innerHTML = summary;
+                        article.appendChild(wrapper);
                     }
                     frag.appendChild(article);
                 });
                 entriesEl.textContent = "";
                 entriesEl.appendChild(frag);
             }
-            logEl.textContent = `Feed „${data.name}“ geladen.`;
+            logEl.textContent = `Feed "${feedName}" geladen.`;
         } catch (error) {
             console.error(error);
-            logEl.innerHTML = "<span class='warn'>Fehler beim Laden. Siehe Konsole für Details. Viele Feeds blockieren Browser-Zugriffe wegen CORS.</span>";
+            logEl.innerHTML = "<span class='warn'>Fehler beim Laden. Stellen Sie sicher, dass die Datei im Repository existiert und per Git ausgeliefert wird.</span>";
         } finally {
             button.disabled = false;
         }
